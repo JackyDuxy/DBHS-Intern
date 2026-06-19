@@ -32,13 +32,13 @@ def load_model(adapter_dir: str = ADAPTER_DIR, base_model: str = BASE_MODEL):
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
     )
 
-    print(f"[*] Loading LoRA adapter from {adapter_dir}...")
-    model = PeftModel.from_pretrained(
-        model,
-        adapter_dir,
-        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-    )
-
+    # print(f"[*] Loading LoRA adapter from {adapter_dir}...")
+    # model = PeftModel.from_pretrained(
+    #     model,
+    #     adapter_dir,
+    #     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+    # )
+    # print(type(model))
     model.config.pad_token_id = tokenizer.eos_token_id
     model.config.eos_token_id = tokenizer.eos_token_id
     if model.config.bos_token_id is None:

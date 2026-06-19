@@ -94,27 +94,27 @@ def deduplicate_dataset(dataset, max_examples=None):
     """
     seen_questions = {}
     deduplicated = []
-    
+
     for i, example in enumerate(dataset):
         if max_examples and len(deduplicated) >= max_examples:
             break
-            
+
         messages = example.get("messages", [])
         if not isinstance(messages, list) or len(messages) < 2:
             continue
-        
+
         # Extract question (first user message)
         question = messages[0].get("content", "").strip().lower()
         if not question or len(question) < 5:
             continue
-        
+
         # Skip if exact question already seen
         if question in seen_questions:
             continue
-        
+
         seen_questions[question] = i
         deduplicated.append(example)
-    
+
     removed = len(dataset) - len(deduplicated)
     print(
         f"[*] After deduplication: {len(dataset)} -> {len(deduplicated)} "
@@ -137,7 +137,7 @@ def format_chat_for_training(example):
     messages = example.get("messages", [])
     if not isinstance(messages, list):
         messages = [{"role": "user", "content": str(messages)}]
-    
+
     # Apply chat template
     if tokenizer.chat_template:
         text = tokenizer.apply_chat_template(
@@ -151,7 +151,7 @@ def format_chat_for_training(example):
             f"<|{m['role']}|>\n{m['content']}<|end|>"
             for m in messages
         )
-    
+
     return {"text": text}
 
 print("\n[*] Formatting dataset...")

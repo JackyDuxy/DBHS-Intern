@@ -8,12 +8,16 @@ Changes from v1:
 4. Repetition penalty and token limits improved
 """
 
+'''
+The current fine-tuned DBHS assistant demonstrates that the LoRA adapter is loading successfully and influencing model behavior; however, the model frequently generates plausible but incorrect school-related information instead of accurately retrieving DBHS-specific facts. This suggests that the primary issue is not model loading or inference, but rather insufficient knowledge retention during fine-tuning. Although the training dataset contains correct DBHS information, critical facts such as staff names, coordinator roles, and school identifiers appear too infrequently relative to the model's extensive pretraining knowledge. As a result, when confidence is low, the model defaults to generating realistic-looking educational information based on its prior knowledge rather than recalling the intended DBHS facts. The problem is likely exacerbated by limited reinforcement of key facts, synthetic dataset distribution, and the use of fine-tuning alone for knowledge storage. Future improvements should focus on increasing fact coverage and repetition, strengthening LoRA adaptation, improving dataset quality, and potentially incorporating a retrieval-augmented generation (RAG) system to provide reliable access to authoritative DBHS information.
+'''
+
 import os
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 
-BASE_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"  # CHANGED: Was distilgpt2
+BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"  # CHANGED: Was distilgpt2
 ADAPTER_DIR = "dbhs_lora_v2"
 MAX_SEQ_LENGTH = 2048
 
@@ -32,13 +36,14 @@ def load_model(adapter_dir: str = ADAPTER_DIR, base_model: str = BASE_MODEL):
         torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
     )
 
-    # print(f"[*] Loading LoRA adapter from {adapter_dir}...")
-    # model = PeftModel.from_pretrained(
-    #     model,
-    #     adapter_dir,
-    #     torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-    # )
-    # print(type(model))
+    print(f"[*] Loading LoRA adapter from {adapter_dir}...")
+    model = PeftModel.from_pretrained(
+        model,
+        adapter_dir,
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+    )
+    print(type(model))
+
     model.config.pad_token_id = tokenizer.eos_token_id
     model.config.eos_token_id = tokenizer.eos_token_id
     if model.config.bos_token_id is None:

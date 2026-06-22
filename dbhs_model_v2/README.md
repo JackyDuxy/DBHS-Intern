@@ -1,5 +1,5 @@
 ---
-base_model: Qwen/Qwen2.5-0.5B-Instruct
+base_model: Qwen/Qwen2.5-1.5B-Instruct
 library_name: transformers
 model_name: dbhs_model_v2
 tags:
@@ -11,7 +11,7 @@ licence: license
 
 # Model Card for dbhs_model_v2
 
-This model is a fine-tuned version of [Qwen/Qwen2.5-0.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct).
+This model is a fine-tuned version of [Qwen/Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct).
 It has been trained using [TRL](https://github.com/huggingface/trl).
 
 ## Quick start

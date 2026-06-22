@@ -2,12 +2,20 @@
 DBHS Fine-Tuning Pipeline v2 — Corrected & Production-Ready
 
 Changes from v1:
-1. Model: distilgpt2 → Qwen2.5-0.5B-Instruct (better for knowledge tasks)
+1. Model: distilgpt2 → Qwen2.5-1.5B-Instruct (better factual recall & instruction following)
 2. Format: Unified to use model-native chat template
 3. Packing: Disabled to prevent sample contamination
 4. Loss objective: full prompt training for TRL 1.6.0 (assistant-only masking not yet applied)
 5. Generation: Fixed do_sample logic
 6. Data: Added validation & duplicate detection
+7. Quantization: QLoRA (4-bit) for memory efficiency
+
+Optimized for RTX 5060Ti (16GB VRAM):
+- QLoRA (4-bit quantization) reduces memory usage by 50-60%
+- Gradient checkpointing enabled for efficiency
+- Batch size: 2 with gradient accumulation 4 (effective batch size 8)
+- MAX_LENGTH: 2048 tokens (full length supported)
+- SDPA attention (no FlashAttention dependencies)
 """
 
 import torch
@@ -15,9 +23,10 @@ from datasets import load_dataset, Dataset
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
+    BitsAndBytesConfig,
 )
 from trl import SFTTrainer, SFTConfig
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 import json
 from typing import Dict, List
 
@@ -25,10 +34,11 @@ from typing import Dict, List
 # Configuration
 # ============================================================
 
-MODEL_NAME = "Qwen/Qwen2.5-0.5B-Instruct"  # CHANGED: Was distilgpt2
+MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"  # 1.5B better for DBHS knowledge tasks (better recall & reasoning)
 BASE_MODEL = MODEL_NAME
-MAX_LENGTH = 2048
+MAX_LENGTH = 2048  # RTX 5060Ti 16GB can handle full length with QLoRA
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+USE_QLORA = True  # Use 4-bit quantization for memory efficiency
 
 print(f"Using device: {DEVICE}")
 if DEVICE == "cuda":
@@ -36,6 +46,8 @@ if DEVICE == "cuda":
     print(f"Current CUDA device: {torch.cuda.current_device()}")
     print(f"CUDA device name: {torch.cuda.get_device_name(torch.cuda.current_device())}")
     torch.backends.cudnn.benchmark = True
+    # Enable memory-efficient settings for RTX 5060Ti
+    torch.cuda.empty_cache()
 
 # ============================================================
 # Load Model
@@ -53,11 +65,32 @@ if tokenizer.pad_token is None:
 print(f"[*] Chat template available: {tokenizer.chat_template is not None}")
 
 print("\n[*] Loading model...")
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
-    trust_remote_code=True,
-)
+
+if USE_QLORA:
+    # QLoRA: 4-bit quantization to reduce memory by 50-60%
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16,
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        quantization_config=bnb_config,
+        trust_remote_code=True,
+        device_map="auto",
+    )
+    # Prepare model for kbit training (QLoRA)
+    model = prepare_model_for_kbit_training(model)
+else:
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
+        trust_remote_code=True,
+    )
+    model.to(DEVICE)
+
+# Enable gradient checkpointing for memory efficiency
+model.gradient_checkpointing_enable()
 
 # ============================================================
 # LoRA Configuration
@@ -66,13 +99,14 @@ model = AutoModelForCausalLM.from_pretrained(
 lora_config = LoraConfig(
     r=16,
     lora_alpha=32,
-    target_modules=["q_proj", "v_proj"],  # CHANGED: Was c_attn, c_proj (GPT-2 specific)
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],  # All attention projections for better adaptation
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
 )
 model = get_peft_model(model, lora_config)
-model.to(DEVICE)
+if not USE_QLORA:
+    model.to(DEVICE)
 print(f"[*] LoRA applied. Trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
 # ============================================================
@@ -199,15 +233,15 @@ training_args = SFTConfig(
     output_dir="dbhs_model_v2",
     num_train_epochs=3,
     learning_rate=5e-5,
-    per_device_train_batch_size=4,
-    per_device_eval_batch_size=4,
-    gradient_accumulation_steps=2,
+    per_device_train_batch_size=2,  # Reduced for 1.5B model stability with QLoRA
+    per_device_eval_batch_size=2,
+    gradient_accumulation_steps=4,  # Effective batch size: 2 × 4 = 8 (good training dynamics)
     warmup_ratio=0.1,
     weight_decay=0.01,
     lr_scheduler_type="cosine",
     optim="adamw_torch",
     bf16=False,
-    fp16=True if DEVICE == "cuda" else False,
+    fp16=False if USE_QLORA else (True if DEVICE == "cuda" else False),  # Disable fp16 with QLoRA to avoid precision issues
     logging_steps=10,
     eval_strategy="steps",
     eval_steps=50,
@@ -218,6 +252,7 @@ training_args = SFTConfig(
     greater_is_better=False,
     report_to="none",
     max_length=MAX_LENGTH,
+    gradient_checkpointing=True,
 )
 
 trainer = SFTTrainer(
@@ -245,5 +280,7 @@ model.save_pretrained("dbhs_lora_v2")
 tokenizer.save_pretrained("dbhs_lora_v2")
 
 print("[✓] Training complete. Adapter saved to dbhs_lora_v2/")
-print("[✓] Base model: Qwen/Qwen2.5-0.5B-Instruct")
+print("[✓] Base model: Qwen/Qwen2.5-1.5B-Instruct (with QLoRA 4-bit quantization)")
 print("[✓] Use main_v2.py for inference with this adapter.")
+if USE_QLORA:
+    print("[✓] Memory-efficient QLoRA training (4-bit quantization enabled)")

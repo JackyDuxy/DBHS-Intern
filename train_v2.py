@@ -97,9 +97,12 @@ model.gradient_checkpointing_enable()
 # ============================================================
 
 lora_config = LoraConfig(
-    r=16,
-    lora_alpha=32,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],  # All attention projections for better adaptation
+    r=64,                          # INCREASED 16→64: more capacity for fact memorization
+    lora_alpha=128,                # 2x rank ratio
+    target_modules=[               # EXPANDED: attention + all FFN layers
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+    ],
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
@@ -231,11 +234,11 @@ print(f"[*] Train: {len(train_dataset)}, Eval: {len(eval_dataset)}")
 print("\n[*] Configuring trainer...")
 training_args = SFTConfig(
     output_dir="dbhs_model_v2",
-    num_train_epochs=3,
-    learning_rate=5e-5,
-    per_device_train_batch_size=2,  # Reduced for 1.5B model stability with QLoRA
+    num_train_epochs=5,            # INCREASED 3→5: more passes for fact retention
+    learning_rate=3e-5,            # LOWERED slightly for stability with larger LoRA
+    per_device_train_batch_size=2,
     per_device_eval_batch_size=2,
-    gradient_accumulation_steps=4,  # Effective batch size: 2 × 4 = 8 (good training dynamics)
+    gradient_accumulation_steps=4,  # Effective batch size: 8
     warmup_ratio=0.1,
     weight_decay=0.01,
     lr_scheduler_type="cosine",
